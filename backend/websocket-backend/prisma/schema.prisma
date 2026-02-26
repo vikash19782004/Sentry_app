@@ -55,6 +55,7 @@ model EmergencyContact {
 
   name     String
   phone    String
+  email    String?
   relation String
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

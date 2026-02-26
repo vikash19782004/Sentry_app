@@ -1,5 +1,10 @@
 import WebSocket from "ws";
 import { prisma } from "./prisma.js";
+import { emailQueue } from "./queues/emailQueue.js";
+import { emailService } from "./services/emailService.js";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 type Role = "USER" | "ADMIN";
 
@@ -44,6 +49,7 @@ export class ClientManager {
     if (message.type !== "LOCATION") return;
 
     const location = message.payload;
+    const risk = this.calculateRisk(location.latitude, location.longitude);
 
     await prisma.locationLog.create({
       data: {
@@ -54,14 +60,57 @@ export class ClientManager {
         speed: location.speed,
         heading: location.heading,
         source: location.source,
-        riskScore: this.calculateRisk(
-          location.latitude,
-          location.longitude
-        ),
+        riskScore: risk,
       },
     });
 
     ClientManager.sendToAdmins(this.userId, location);
+
+    // If risk is high, enqueue an email notification job
+    const HIGH_RISK_THRESHOLD = Number(process.env.HIGH_RISK_THRESHOLD ?? 8);
+    if (risk >= HIGH_RISK_THRESHOLD) {
+      try {
+        // fetch emergency contacts for the user
+        const contacts = await prisma.emergencyContact.findMany({ where: { userId: this.userId } });
+
+        let enqueued = 0;
+        for (const contact of contacts) {
+          // support optional email field if present in DB; fall back: skip if not present
+          const contactEmail = (contact as any).email as string | undefined;
+          if (!contactEmail) continue;
+          try {
+            await emailQueue.add("sendEmail", {
+              email: contactEmail,
+              subject: `High risk alert for ${this.userId}`,
+              htmlContent: `<h3>High risk detected: ${risk}</h3><p>User: ${this.userId}</p><p>Location: ${location.latitude}, ${location.longitude}</p>`,
+              userId: this.userId,
+              latitude: location.latitude,
+              longitude: location.longitude,
+              risk,
+              contactId: contact.id,
+            });
+          } catch (err) {
+            console.warn("emailQueue.add failed, falling back to direct send:", (err as any)?.message ?? err);
+            try {
+              await emailService.sendEmail(
+                contactEmail,
+                `High risk alert for ${this.userId}`,
+                `<h3>High risk detected: ${risk}</h3><p>User: ${this.userId}</p><p>Location: ${location.latitude}, ${location.longitude}</p>`
+              );
+            } catch (err2) {
+              console.error("Direct email send failed:", err2);
+            }
+          }
+          enqueued++;
+        }
+
+        if (enqueued === 0) {
+          console.warn(`No emergency contact email found for user ${this.userId}; no emails enqueued`);
+        }
+      } catch (err) {
+        console.error("Failed to enqueue email job:", err);
+      }
+    }
   }
 
   private static sendToAdmins(userId: string, location: LocationMessage["payload"]) {

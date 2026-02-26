@@ -14,27 +14,19 @@ router.post("/signup", async (req: Request, res: Response) => {
   try {
     const {
       name,
-      age,
-      emailAddress,
-      phoneNumber,
-      nationality,
-      adhaarNumber,
-      contactName,
-      contactemail,
-      relationship,
+      email,
+      phone,
       password,
-      destination,
-      // ⚠️ role NOT taken from frontend for security
     } = req.body;
 
-    if (!emailAddress || !password) {
+    if (!email || !password) {
       return res
         .status(400)
         .json({ message: "Email and password are required" });
     }
 
     const existingUser = await prisma.user.findUnique({
-      where: { emailAddress },
+      where: { email },
     });
 
     if (existingUser) {
@@ -46,17 +38,10 @@ router.post("/signup", async (req: Request, res: Response) => {
     const newUser = await prisma.user.create({
       data: {
         name: name || "",
-        age: age || 0,
-        emailAddress,
-        phoneNumber: phoneNumber || "",
-        nationality: nationality || "",
-        adhaarNumber: adhaarNumber || null,
-        contactName: contactName || "",
-        contactemail: contactemail || "",
-        relationship: relationship || "",
+        email,
+        phone: phone || "",
         password: hashedPassword,
-        destination: destination || null,
-        role: "user", // ✅ forced default role
+        role: "USER",
       },
     });
 
@@ -75,7 +60,7 @@ router.post("/signup", async (req: Request, res: Response) => {
       user: {
         id: newUser.id,
         name: newUser.name,
-        email: newUser.emailAddress,
+        email: newUser.email,
         role: newUser.role,
       },
     });
@@ -90,16 +75,14 @@ router.post("/signup", async (req: Request, res: Response) => {
  */
 router.post("/signin", async (req: Request, res: Response) => {
   try {
-    const { emailAddress, password } = req.body;
+    const { email, password } = req.body;
 
-    if (!emailAddress || !password) {
-      return res
-        .status(400)
-        .json({ message: "Email and password are required" });
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
     }
 
     const user = await prisma.user.findUnique({
-      where: { emailAddress },
+      where: { email },
     });
 
     if (!user) {
@@ -114,7 +97,7 @@ router.post("/signin", async (req: Request, res: Response) => {
     const token = jwt.sign(
       {
         userId: user.id,
-        role: user.role, // ✅ role in JWT
+        role: user.role, //  role in JWT
       },
       JWT_SECRET,
       { expiresIn: "6h" }
@@ -126,7 +109,7 @@ router.post("/signin", async (req: Request, res: Response) => {
       user: {
         id: user.id,
         name: user.name,
-        email: user.emailAddress,
+        email: user.email,
         role: user.role,
       },
     });
